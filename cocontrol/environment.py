@@ -85,7 +85,7 @@ class CoControlEnv:
             raise Exception("Env is active, call terminate first")
 
         self._info = self._env.reset(train_mode=train_mode)[self._brain_name]
-        self._scores = [0.0] * self.get_agent_size()
+        self._scores = np.zeros(self.get_agent_size())
 
         return self._info.vector_observations
 
@@ -109,13 +109,13 @@ class CoControlEnv:
         next_states = self._info.vector_observations
         rewards = self._info.rewards
         is_terminals = self._info.local_done
-        self._scores += rewards
+        self._scores += np.array(rewards)
 
         return rewards, next_states, is_terminals
 
     def terminate(self):
         self._info = None
-        self._score = None
+        self._scores = None
 
     def close(self):
         self._env.close()
@@ -123,7 +123,7 @@ class CoControlEnv:
 
     def get_score(self):
         """Return the cumulative reward of the current episode."""
-        return self._score
+        return self._scores
 
     def get_agent_size(self):
         if self._info is None:
@@ -141,14 +141,14 @@ class CoControlEnv:
 class CoControlAgent:
     """Agent based on a policy approximator."""
 
-    def __init__(self, pi):
+    def __init__(self, policy):
         """Initialize the agent.
 
         Args:
             pi: policy-function that is callable with n states and returns a
                 (n, a)-dim array-like containing the value of each action.
         """
-        self._pi = pi
+        self._policy = policy
 
     def act(self, states):
         """Select actions for the given states.
@@ -160,15 +160,17 @@ class CoControlAgent:
         """
         if not torch.is_tensor(states):
             try:
-                states = torch.from_numpy(states)
+                states = torch.from_numpy(states, dtype=torch.float)
             except:
                 states = torch.from_numpy(np.array(states, dtype=np.float))
-
-        states = states.float()
+        else:
+            states = states.float()
 
         with torch.no_grad():
-            return self._pi(states)
+            return self._policy.sample(states)
 
+    def get_policy(self):
+        return self._policy
 
 if __name__ == '__main__':
     # Run as > PYTHONPATH=".." python environment.py
