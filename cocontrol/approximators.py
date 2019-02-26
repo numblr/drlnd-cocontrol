@@ -30,7 +30,7 @@ class Approximator(nn.Module):
         x = F.relu(self.fc3(x))
         x = F.relu(self.fc4(x))
 
-        return self.fc5(x)
+        return torch.tanh(self.fc5(x))
 
 class SimpleApproximator(nn.Module):
     """Simple Function Approximator."""
@@ -48,14 +48,10 @@ class SimpleApproximator(nn.Module):
 
     def forward(self, state):
         """Build a network that maps state -> action values."""
-        for p in self.parameters():
-            if torch.isnan(p).any():
-                raise ValueError("Illegal state: nans found")
-
         x = F.relu(self.fc1(state))
         x = F.relu(self.fc2(x))
 
-        return self.fc3(x)
+        return torch.tanh(self.fc3(x))
 
 class Policy():
     def __init__(self, approximator, sigma=1.0, cap=[-1.0, 1.0]):
@@ -77,10 +73,6 @@ class Policy():
 
         if not states.size()[:2] == actions.size()[:2]:
             raise ValueError("dimenions don't match: " + str(states.size()) + "-" + str(actions.size()))
-
-        # states is checked in distributions
-        if torch.isnan(actions).any():
-            raise ValueError("Nan values found")
 
         states = states.to(device, dtype=torch.float)
         actions = actions.to(device, dtype=torch.float)
@@ -104,20 +96,9 @@ class Policy():
     def distributions(self, states):
         means = self._approximator(states.to(device, dtype=torch.float))
 
-        with torch.no_grad():
-            if torch.isnan(states).any():
-                raise ValueError("Nan values found")
-            if torch.isnan(means).any():
-                raise ValueError("Nan: " + str(means))
-            assert self._sigma > 0.0
-
         return dist.Normal(means, self._sigma)
 
-
     def sample(self, states):
-        if torch.isnan(states).any():
-            raise ValueError("Nan values found")
-
         sample = self.distributions(states).sample()
 
         if self._cap_min is None or self._cap_max is None:

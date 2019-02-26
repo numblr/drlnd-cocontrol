@@ -68,6 +68,9 @@ class CoControlEnv:
             states = next_states
             is_terminal = np.any(is_terminals)
             count += 1
+            if np.any(np.isnan(states)):
+                raise ValueError("Nan from env")
+            # print("step" + str(count))
 
             yield step_data
 
@@ -81,8 +84,8 @@ class CoControlEnv:
         Returns:
             The initial state of the episode (np.array).
         """
-        if self._info is not None and not np.any(self._info.local_done):
-            raise Exception("Env is active, call terminate first")
+        # if self._info is not None and not np.any(self._info.local_done):
+        #     raise Exception("Env is active, call terminate first")
 
         self._info = self._env.reset(train_mode=train_mode)[self._brain_name]
         self._scores = np.zeros(self.get_agent_size())

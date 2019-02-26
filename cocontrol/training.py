@@ -1,5 +1,7 @@
 from pprint import pprint
 
+import math
+
 import torch
 from torch import optim
 import torch.nn.functional as F
@@ -170,9 +172,9 @@ class REINFORCELearner():
 
     def __init__(self, env=None, model=SimpleApproximator,
             batch_steps=4, batch_size=64, batch_repeat=4,
-            lr=1e-4, decay=0.001,
-            sigma_start=0.5, sigma_min=1e-3, sigma_decay=0.99,
-            gamma=1.0, tau=1e-3):
+            lr=1e-5, decay=0.001,
+            sigma_start=0.2, sigma_min=1e-2, sigma_decay=0.99,
+            gamma=1.0):
         # Don't instantiate as default as the constructor already starts the unity environment
         self._env = env if env is not None else CoControlEnv()
 
@@ -182,26 +184,27 @@ class REINFORCELearner():
         self._batch_steps = batch_steps
         self._batch_size = batch_size
         self._batch_repeat = batch_repeat
-        self._sample_size = 4
+        self._sample_size = 32
 
         self._sigma_start = sigma_start
         self._sigma_min = sigma_min
         self._sigma_decay = sigma_decay
         self._gamma = gamma
 
-        self._state_values = model(self._state_size, 1).to(device)
+        self._lr = lr
         self._policy_parms = model(self._state_size, self._actions).to(device)
+        # def init_weights(m):
+        #     if type(m) == torch.nn.Linear:
+        #         torch.nn.init.orthogonal_(m.weight, gain=3.0)
+        #         m.bias.data.fill_(0.01)
+        # self._policy_parms.apply(init_weights)
 
-        self._state_values_optimizer = optim.Adam(self._state_values.parameters(), lr=lr,
-            amsgrad=True)
-        self._policy_optimizer = optim.Adam(self._policy_parms.parameters(), lr=lr,
-            amsgrad=True)
+        self._policy_optimizer = optim.SGD(self._policy_parms.parameters(), lr=lr)
 
-        self._state_values.eval()
         self._policy_parms.eval()
 
         print("Initialize TDActorCriticLearner with model:")
-        print(self._state_values)
+        print(self._policy_parms)
 
     def save(self, path):
         """Store the learning result.
@@ -209,7 +212,6 @@ class REINFORCELearner():
         Store the parameters of the current Q-function approximation to the given path.
         """
         # TODO path/doc
-        torch.save(self._qnetwork_local.state_dict(), path + "_v")
         torch.save(self._policy_parms.state_dict(), path + "_pi")
 
     def load(self, path):
@@ -219,9 +221,7 @@ class REINFORCELearner():
         Q-function approximator.
         """
         # TODO path/doc
-        self._state_values.load_state_dict(torch.load(path))
         self._policy_parms.load_state_dict(torch.load(path))
-        self._state_values.to(device)
         self._policy_parms.to(device)
 
     def get_agent(self, episode_cnt):
@@ -244,9 +244,11 @@ class REINFORCELearner():
             next_states = self._cat_component(episodes, 3)
             is_terminals = self._cat_component(episodes, 4)
 
+            print(states.size())
+
             # Validate dimensions
-            assert self._sample_size * self._env.get_agent_size() == states.size()[0] == actions.size()[0] \
-                    == rewards.size()[0] == next_states.size()[0] == is_terminals.size()[0]
+            assert states.size()[0] == actions.size()[0] == rewards.size()[0] \
+                    == next_states.size()[0] == is_terminals.size()[0]
             assert self._env.get_state_size() == states.size()[2] == next_states.size()[2]
             assert self._env.get_action_size() == actions.size()[2]
             assert 1 == rewards.size()[2] == is_terminals.size()[2]
@@ -254,25 +256,47 @@ class REINFORCELearner():
             policy = self._get_policy(iteration)
             with torch.no_grad():
                 probs = torch.exp(policy.log_prob(states, actions))
-                if torch.mean(probs) < 1e-10:
+                if torch.mean(probs) < 1e-5:
                     print("# WARNING: probs " + str(torch.mean(probs)))
 
             self._policy_parms.train()
 
-            for batch in range(8):
-                performance = - self._clipped_surrogate(policy, probs, states, actions, rewards)
+            batch_size = 8
+            batch_itr = max(1, math.log2(iteration) // 2) if iteration > 0 else 1
+            print(batch_itr)
+            print(self._get_sigma(iteration))
 
-                self._policy_optimizer.zero_grad()
-                performance.backward()
-                self._policy_optimizer.step()
+            for i in range(4):
+                for batch in range(states.size()[0] // batch_size - 1):
+                    performance = - self._clipped_surrogate(policy,
+                            probs[i:i+batch_size,:,:], states[i:i+batch_size,:,:],
+                            actions[i:i+batch_size,:,:], rewards[i:i+batch_size,:,:])
 
-                yield performance, self._env.get_score(), batch == 7
+                    self._policy_optimizer.zero_grad()
+                    performance.backward()
+                    for p in self._policy_parms.parameters():
+                        if not torch.isnan(p.grad).any():
+                            self._policy_optimizer.step()
+                        else:
+                            print("Nan in gradient")
+
+                    with torch.no_grad():
+                        performance_after = - self._clipped_surrogate(policy,
+                                probs[i:i+batch_size,:,:], states[i:i+batch_size,:,:],
+                                actions[i:i+batch_size,:,:], rewards[i:i+batch_size,:,:])
+                        if not performance_after < performance:
+                            self._lr = max(self._lr / 2, 1e-10)
+                            self._policy_optimizer = optim.SGD(self._policy_parms.parameters(), lr=self._lr)
+                            print("learning rate: " + str(self._lr))
+
+                yield performance, self._env.get_score(), i == 3
 
             self._policy_parms.eval()
 
     def _generate_episode(self, iteration):
         agent = self.get_agent(iteration)
-        episode = [ step_data for step_data in self._env.generate_episode(agent, train_mode=True) ]
+        episode = [ step_data for step_data in self._env.generate_episode(agent, max_steps=1000, train_mode=True) ]
+        # episode = [ step_data for step_data in self._env.generate_episode(agent, max_steps=600, train_mode=iteration % 10 != 0) ]
         episode = [ episode_data for episode_data in zip(*episode) ]
 
         states, actions, rewards, next_states, is_terminals = episode
@@ -284,17 +308,48 @@ class REINFORCELearner():
         next_states = torch.stack(tuple(self._to_tensor(n)[0] for n in next_states), dim=1)
         is_terminals = torch.stack(tuple(self._to_tensor(t, dtype=torch.uint8)[0] for t in is_terminals), dim=1)
 
+        assert self._env.get_agent_size() == states.size()[0]
+
+        #split episodes
+        split_size = 50
+
+        states = self._split(states, split_size)
+        actions = self._split(actions, split_size)
+        rewards = self._split(rewards, split_size)
+        next_states = self._split(next_states, split_size)
+        is_terminals = self._split(is_terminals, split_size)
+
+        positive_rewards = torch.sum(rewards, dim=1).squeeze() > 0.0
+        states = states[positive_rewards,:,:]
+        actions = actions[positive_rewards,:,:]
+        rewards = rewards[positive_rewards,:,:]
+        next_states = next_states[positive_rewards,:,:]
+        is_terminals = is_terminals[positive_rewards,:,:]
+
         # Verify dimensions
-        assert self._env.get_agent_size() == states.size()[0] == actions.size()[0] \
-                == rewards.size()[0] == next_states.size()[0] == is_terminals.size()[0]
+        assert states.size()[0] == actions.size()[0] == rewards.size()[0] \
+                == next_states.size()[0] == is_terminals.size()[0]
         assert self._env.get_state_size() == states.size()[2] == next_states.size()[2]
         assert self._env.get_action_size() == actions.size()[2]
         assert 1 == rewards.size()[2] == is_terminals.size()[2]
 
-        return (states, actions, rewards, next_states, is_terminals)
+        return (states, actions, rewards, next_states, is_terminals) if states.nelement() > 0 \
+                else self._generate_episode(iteration)
 
     def _cat_component(self, episodes, component):
         return torch.cat(episodes[component], dim=0)
+
+    def _split(self, x, split_size):
+        if x.size()[1] % split_size != 0:
+            raise ValueError("Illegal state, episode cannot be split: " + str(x.size()))
+
+        splits = x.size()[1] // split_size
+
+        windows = x.view(splits*x.size()[0], split_size, x.size()[2])
+        shifted_windows = x[:,split_size//2:-split_size//2,:].view(
+                splits*x.size()[0] - 1, split_size, x.size()[2])
+
+        return torch.cat((windows, shifted_windows), dim=0)
 
     def _get_sigma(self, cnt):
         return max(self._sigma_min, self._sigma_start * self._sigma_decay ** cnt)
@@ -307,11 +362,10 @@ class REINFORCELearner():
 
     def _clipped_surrogate(self, policy, old_probs, states, actions, rewards,
                 epsilon=0.1, beta=0.001):
-        # discount = self._gamma**torch.arange(len(rewards))
-        # rewards = rewards*discount.unsqueeze(1)
-
         # convert rewards to future rewards
-        rewards_future = torch.flip(torch.flip(rewards, dims=(1,)).cumsum(dim=1), dims=(1,))
+        # rewards_future = torch.flip(torch.flip(rewards, dims=(1,)).cumsum(dim=1), dims=(1,))
+        # rewards_future = rewards_future / discount
+        rewards_future = self._calc_future_rewards(rewards)
 
         mean = torch.mean(rewards_future, dim=1)
         std = torch.clamp(torch.std(rewards_future, dim=1), min=1e-15)
@@ -325,18 +379,22 @@ class REINFORCELearner():
 
         ratio = new_probs/torch.clamp(old_probs, min=1e-10)
         with torch.no_grad():
-            assert not torch.isnan(ratio).any()
+            if torch.mean(ratio) > 10:
+                print("large ratio:" + str(torch.mean(ratio)))
+
 
         clipped = torch.clamp(rewards_normalized * ratio, max=0.0 + epsilon)
 
-        # include a regularization term
-        # this steers new_policy towards 0.5
-        # add in 1.e-10 to avoid log(0) which gives nan
-        # entropy = -(new_probs*torch.log(old_probs+1.e-10)+ \
-        #     (1.0-new_probs)*torch.log(1.0-old_probs+1.e-10))
-
         return torch.mean(clipped)# + beta * entropy)
 
+    def _calc_future_rewards(self, rewards):
+        flipped = torch.flip(rewards, dims=(1,))
+        result = torch.zeros_like(flipped)
+        result[:,0,:] = flipped[:, 0, :]
+        for i in range(1, flipped.size()[1]):
+            result[:,i,:] = self._gamma * result[:,i-1,:] + flipped[:,i,:]
+
+        return torch.flip(result, dims=(1,))
 
 # def train():
 #     discount_rate = .99
