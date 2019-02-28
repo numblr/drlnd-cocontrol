@@ -2,9 +2,8 @@ import numpy as np
 import torch
 from collections import namedtuple
 
-from cocontrol.approximators import SimpleApproximator
 from cocontrol.environment import CoControlEnv, CoControlAgent
-from cocontrol.training import TDActorCriticLearner, REINFORCELearner
+from cocontrol.training import PPOLearner
 from cocontrol.util import print_progress, plot, start_plot, save_plot
 
 Settings=namedtuple('Settings', 'label color model learner parameters scores_fig loss_fig scores losses')
@@ -12,8 +11,8 @@ Settings=namedtuple('Settings', 'label color model learner parameters scores_fig
 DQN_SETTINGS = Settings(**{
     'label': 'DQN',
     'color': 'c',
-    'model': SimpleApproximator,
-    'learner': TDActorCriticLearner,
+    'model': None,
+    'learner': PPOLearner,
     'parameters': 'results/dqn_model.parameters.pt',
     'scores_fig': 'results/dqn_model.scores.png',
     'loss_fig': 'results/dqn_model.losses.png',
@@ -113,7 +112,7 @@ def learn(env, settings, episodes):
     print("\nStart learning with " + settings.label + "\n")
 
     # learner = settings.learner(env=env, model=settings.model)
-    learner = REINFORCELearner(env=env, model=SimpleApproximator)
+    learner = PPOLearner(env=env)
 
     scores, losses = run_learner(learner, settings.parameters, episodes=episodes)
 
