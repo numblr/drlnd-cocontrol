@@ -33,6 +33,7 @@ class Actor(nn.Module):
         # self.bn1 = nn.BatchNorm1d(fc1_units)
         self.fc2 = nn.Linear(fc1_units, fc2_units)
         self.fc3 = nn.Linear(fc2_units, action_size)
+        self.std = nn.Parameter(torch.zeros(action_size)-0.5)
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -45,7 +46,7 @@ class Actor(nn.Module):
         # x = F.relu(self.bn1(self.fc1(state)))
         x = F.relu(self.fc1(state))
         x = F.relu(self.fc2(x))
-        return F.tanh(self.fc3(x))
+        return F.tanh(self.fc3(x)), F.softplus(self.std)
 
 
 class Critic(nn.Module):
@@ -122,9 +123,13 @@ class Policy():
         return torch.sum(log_probs, dim=2).unsqueeze(2)
 
     def distributions(self, states):
-        means = self._approximator(states.to(device, dtype=torch.float))
+        means, stds = self._approximator(states.to(device, dtype=torch.float))
 
-        return dist.Normal(means, self._sigma)
+        if self._sigma - torch.mean(stds).data > 1e-2:
+            self._sigma = torch.mean(stds).data
+            print(torch.mean(stds))
+
+        return dist.Normal(means, stds)
 
     def sample(self, states):
         sample = self.distributions(states).sample()
