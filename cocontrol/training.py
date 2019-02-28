@@ -33,7 +33,7 @@ class PPOLearner():
         self._batch_steps = batch_steps
         self._batch_size = batch_size
         self._batch_repeat = batch_repeat
-        self._sample_size = 32
+        self._sample_size = 8
 
         self._sigma_start = sigma_start
         self._sigma_min = sigma_min
@@ -119,8 +119,10 @@ class PPOLearner():
             for data in (rewards, is_terminals, returns, advantages, values, log_probs):
                 assert 1 == data.size()[2]
 
-            for k in range(8):
-                sampler = self._random_sample(np.arange(states.size(0)), 32)
+            ppo_epochs = 8
+            batch_size = 32
+            for k in range(ppo_epochs):
+                sampler = [idx for idx in self._random_sample(np.arange(states.size(0)), batch_size) ]
                 for batch_indices in sampler:
                     batch_indices = torch.tensor(batch_indices).long()
                     sampled_states = states[batch_indices]
@@ -151,7 +153,7 @@ class PPOLearner():
                     self._value_model.eval()
                     self._policy_model.eval()
 
-                yield policy_loss, self._env.get_score(), k == 7
+                yield policy_loss, self._env.get_score(), k == ppo_epochs - 1
 
     def _generate_episode(self, policy, epoch):
         agent = CoControlAgent(policy)
@@ -207,7 +209,7 @@ class PPOLearner():
             raise ValueError("Illegal state, episode cannot be split: " + str(x.size()))
 
         splits = x.size()[1] // split_size
-        step = 5
+        step = split_size // 10
 
         windows = x.view(splits*x.size()[0], split_size, x.size()[2])
         shifted_windows = tuple([ x[:,i:-split_size+i,:].contiguous()
