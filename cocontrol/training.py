@@ -73,20 +73,20 @@ class PPOLearner():
         self._policy_model.load_state_dict(torch.load(path))
         self._policy_model.to(device)
 
-    def get_agent(self, episode_cnt):
+    def get_agent(self, sigma):
         """Return an agent based on the parameters of the current Q-function approximation.
         """
-        return CoControlAgent(self._get_policy(episode_cnt))
+        return CoControlAgent(self.get_policy(sigma))
 
-    def _get_policy(self, episode_cnt):
-        return Policy(self._policy_model, self._get_sigma(episode_cnt))
+    def get_policy(self, sigma):
+        return Policy(self._policy_model, sigma)
 
     def train(self, num_epochs=100):
         for epoch in range(num_epochs):
-            policy = self._get_policy(epoch)
+            policy = self.get_policy(self._get_sigma(epoch))
 
             # _generate_episode: (state, actions, rewards, next_states, is_terminals)
-            episodes = [ self._generate_episode(epoch) for i in range(self._sample_size) ]
+            episodes = [ self._generate_episode(policy, epoch) for i in range(self._sample_size) ]
             episodes = [ e for e in zip(*episodes) ]
 
             states = self._cat_component(episodes, 0).detach()
@@ -153,8 +153,9 @@ class PPOLearner():
 
                 yield policy_loss, self._env.get_score(), k == 7
 
-    def _generate_episode(self, iteration):
-        agent = self.get_agent(iteration)
+    def _generate_episode(self, policy, epoch):
+        agent = CoControlAgent(policy)
+
         episode = [ step_data for step_data in self._env.generate_episode(agent, max_steps=1000, train_mode=True) ]
         episode = [ episode_data for episode_data in zip(*episode) ]
 
@@ -170,7 +171,8 @@ class PPOLearner():
         assert self._env.get_agent_size() == states.size()[0]
 
         #split episodes
-        split_size = 100
+        split_index = int(max(0, min(6, math.log2(epoch) - 2)) if epoch > 0 else 0)
+        split_size = (50, 100, 125, 200, 250, 500, 1000)[split_index]
 
         states = self._split(states, split_size)
         actions = self._split(actions, split_size)
@@ -195,7 +197,7 @@ class PPOLearner():
         print("Generated episode: " + str(states.size()) + " (of " + str(len(positive_rewards)) + ")")
 
         return (states, actions, rewards, next_states, is_terminals) if states.nelement() > 0 \
-                else self._generate_episode(iteration)
+                else self._generate_episode(policy)
 
     def _cat_component(self, episodes, component):
         return torch.cat(episodes[component], dim=0)
@@ -205,12 +207,16 @@ class PPOLearner():
             raise ValueError("Illegal state, episode cannot be split: " + str(x.size()))
 
         splits = x.size()[1] // split_size
+        step = 5
 
         windows = x.view(splits*x.size()[0], split_size, x.size()[2])
-        shifted_windows = x[:,split_size//2:-split_size//2,:].contiguous().view(
-                (splits-1)*x.size()[0], split_size, x.size()[2])
+        shifted_windows = tuple([ x[:,i:-split_size+i,:].contiguous()
+                .view((splits-1)*x.size()[0], split_size, x.size()[2])
+                for i in range(1, split_size, step) ])
+        # shifted_windows = x[:,split_size//2:-split_size//2,:].contiguous().view(
+        #         (splits-1)*x.size()[0], split_size, x.size()[2])
 
-        return torch.cat((windows, shifted_windows), dim=0)
+        return torch.cat((windows,) + shifted_windows, dim=0)
 
     def _get_sigma(self, cnt):
         return max(self._sigma_min, self._sigma_start * self._sigma_decay ** cnt)
