@@ -22,7 +22,7 @@ class PPOLearner():
     def __init__(self, env=None,
             batch_steps=4, batch_size=64, batch_repeat=4,
             lr=5e-4, decay=0.001,
-            sigma_start=0.5, sigma_min=1e-2, sigma_decay=0.995,
+            sigma_start=0.5, sigma_min=1e-2, sigma_decay=0.98,
             gamma=1.0):
         # Don't instantiate as default as the constructor already starts the unity environment
         self._env = env if env is not None else CoControlEnv()
