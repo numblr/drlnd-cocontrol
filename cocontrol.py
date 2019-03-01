@@ -66,7 +66,7 @@ SETTINGS = {
 }
 
 
-def run_learner(learner, result_path, episodes=1000, checkpoint_window=33):
+def run_learner(learner, result_path, episodes=500, checkpoint_window=33):
     scores = ()
     performances = ()
 
