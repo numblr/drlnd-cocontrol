@@ -22,7 +22,7 @@ class PPOLearner():
     def __init__(self, env=None,
             batch_steps=4, batch_size=64, batch_repeat=4,
             lr=5e-4, decay=0.001,
-            sigma_start=0.5, sigma_min=1e-2, sigma_decay=0.99,
+            sigma_start=0.5, sigma_min=1e-2, sigma_decay=0.995,
             gamma=1.0):
         # Don't instantiate as default as the constructor already starts the unity environment
         self._env = env if env is not None else CoControlEnv()
@@ -41,12 +41,14 @@ class PPOLearner():
         self._gamma = gamma
         self._gae_tau = 0.95
 
+        self._split_index = 0
+
         self._lr = lr
         self._policy_model = Actor(self._state_size, self._actions).to(device)
         self._value_model = Critic(self._state_size, 1).to(device)
 
-        self._policy_optimizer = optim.SGD(self._policy_model.parameters(), lr=lr)
-        self._value_optimizer = optim.SGD(self._value_model.parameters(), lr=lr)
+        self._policy_optimizer = optim.Adam(self._policy_model.parameters(), lr, eps=1e-5)
+        self._value_optimizer = optim.Adam(self._value_model.parameters(), lr, eps=1e-5)
 
         self._policy_model.eval()
         self._value_model.eval()
@@ -171,8 +173,8 @@ class PPOLearner():
         assert self._env.get_agent_size() == states.size()[0]
 
         #split episodes
-        split_index = int(max(0, min(6, math.log2(epoch) - 2)) if epoch > 0 else 0)
-        split_size = (50, 100, 125, 200, 250, 500, 1000)[split_index]
+        self._split_index = int(max(0, min(6, math.log2(epoch) - 2)) if epoch > 0 else 0)
+        split_size = (50, 100, 125, 200, 250, 500, 1000)[self._split_index]
 
         states = self._split(states, split_size)
         actions = self._split(actions, split_size)
@@ -186,6 +188,9 @@ class PPOLearner():
         rewards = rewards[positive_rewards,:,:]
         next_states = next_states[positive_rewards,:,:]
         is_terminals = is_terminals[positive_rewards,:,:]
+
+        # if states.size()[0]/len(positive_rewards) > 0.9:
+        #     self._split_index = min(6, self._split_index + 1)
 
         # Verify dimensions
         assert states.size()[0] == actions.size()[0] == rewards.size()[0] \
@@ -213,8 +218,6 @@ class PPOLearner():
         shifted_windows = tuple([ x[:,i:-split_size+i,:].contiguous()
                 .view((splits-1)*x.size()[0], split_size, x.size()[2])
                 for i in range(1, split_size, step) ])
-        # shifted_windows = x[:,split_size//2:-split_size//2,:].contiguous().view(
-        #         (splits-1)*x.size()[0], split_size, x.size()[2])
 
         return torch.cat((windows,) + shifted_windows, dim=0)
 
