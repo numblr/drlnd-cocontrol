@@ -86,14 +86,11 @@ class PPOLearner():
             policy = self.get_policy(self._get_sigma(epoch))
 
             # _generate_episode: (state, actions, rewards, next_states, is_terminals)
-            episodes = [ self._generate_episode(policy, epoch) for i in range(self._sample_size) ]
-            episodes = [ e for e in zip(*episodes) ]
+            episodes = ( self._generate_episode(policy, epoch) for i in range(self._sample_size) )
+            episodes = ( e for e in zip(*episodes) )
 
-            states = self._cat_component(episodes, 0).detach()
-            actions = self._cat_component(episodes, 1).detach()
-            rewards = self._cat_component(episodes, 2).detach()
-            next_states = self._cat_component(episodes, 3).detach()
-            is_terminals = self._cat_component(episodes, 4).detach()
+            states, actions, rewards, next_states, is_terminals = \
+                    [ torch.cat(component, dim=0).detach() for component in episodes ]
 
             returns = self._calculate_returns(rewards).detach()
             log_probs = policy.log_prob(states, actions).detach()
@@ -158,10 +155,11 @@ class PPOLearner():
     def _generate_episode(self, policy, epoch):
         agent = CoControlAgent(policy)
 
-        episode = [ step_data for step_data in self._env.generate_episode(agent, max_steps=1000, train_mode=True) ]
+        episode = ( step_data for step_data in self._env.generate_episode(agent, max_steps=1000, train_mode=True) )
         episode = [ episode_data for episode_data in zip(*episode) ]
 
         states, actions, rewards, next_states, is_terminals = episode
+        del episode
 
         # state = tuple of (1,33) arrays, etc.., concat along first dimension
         states = torch.stack(tuple(self._to_tensor(s)[0] for s in states), dim=1)
