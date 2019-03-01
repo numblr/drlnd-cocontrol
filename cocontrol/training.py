@@ -23,7 +23,7 @@ class PPOLearner():
             batch_steps=4, batch_size=64, batch_repeat=4,
             lr=5e-4, decay=0.001,
             sigma_start=0.5, sigma_min=1e-2, sigma_decay=0.98,
-            gamma=0.99):
+            gamma=1.0):
         # Don't instantiate as default as the constructor already starts the unity environment
         self._env = env if env is not None else CoControlEnv()
 
@@ -39,7 +39,7 @@ class PPOLearner():
         self._sigma_min = sigma_min
         self._sigma_decay = sigma_decay
         self._gamma = gamma
-        self._gae_tau = 0.95
+        self._gae_tau = 0.75
 
         self._split_index = 0
 
@@ -173,8 +173,8 @@ class PPOLearner():
         assert self._env.get_agent_size() == states.size()[0]
 
         #split episodes
-        self._split_index = int(max(0, min(6, math.log2(epoch) - 2)) if epoch > 0 else 0)
-        split_size = (50, 100, 125, 200, 250, 500, 1000)[self._split_index]
+        self._split_index = min(4, epoch // 25)
+        split_size = (50, 100, 200, 500, 1000)[self._split_index]
 
         states = self._split(states, split_size)
         actions = self._split(actions, split_size)
