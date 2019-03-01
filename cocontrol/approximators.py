@@ -17,7 +17,7 @@ def hidden_init(layer):
 class Actor(nn.Module):
     """Actor (Policy) Model."""
 
-    def __init__(self, state_size, action_size, seed=2, fc1_units=256, fc2_units=128):
+    def __init__(self, state_size, action_size, seed=2, fc1_units=128, fc2_units=64):
         """Initialize parameters and build model.
         Params
         ======
@@ -52,7 +52,7 @@ class Actor(nn.Module):
 class Critic(nn.Module):
     """Critic (Value) Model."""
 
-    def __init__(self, state_size, action_size, seed=2, fc1_units=256, fc2_units=128):
+    def __init__(self, state_size, action_size, seed=2, fc1_units=128, fc2_units=64):
         """Initialize parameters and build model.
         Params
         ======
@@ -125,11 +125,11 @@ class Policy():
     def distributions(self, states):
         means, stds = self._approximator(states.to(device, dtype=torch.float))
 
-        if self._sigma - torch.mean(stds).data > 1e-2:
-            self._sigma = torch.mean(stds).data
-            print(torch.mean(stds))
+        # if self._sigma - torch.mean(stds).data > 1e-2:
+        #     self._sigma = torch.mean(stds).data
+        #     print(torch.mean(stds))
 
-        return dist.Normal(means, stds)
+        return dist.Normal(means, self._sigma)
 
     def sample(self, states):
         sample = self.distributions(states).sample()
