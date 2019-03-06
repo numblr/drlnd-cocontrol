@@ -15,7 +15,7 @@ PLATFORM_PATHS = ['Reacher.app',
         'Reacher_Linux_NoVis/Reacher.x86_64']
 
 class CoControlEnv:
-    """Banana collection environment.
+    """Continuous control environment.
 
     The environment accepts actions and provides states and rewards in response.
     """
@@ -42,6 +42,7 @@ class CoControlEnv:
 
         self._info = None
         self._scores = None
+        self._score_history = ()
 
     def generate_episode(self, agent, max_steps=None, train_mode=False):
         """Create a generator for and episode driven by an actor.
@@ -68,8 +69,14 @@ class CoControlEnv:
             states = next_states
             is_terminal = np.any(is_terminals)
             count += 1
+            if np.any(np.isnan(states)):
+                raise ValueError("Nan from env")
+            # print("step" + str(count))
 
             yield step_data
+
+        self._score_history += (self.get_score(), )
+        self._scores = None
 
     def reset(self, train_mode=False):
         """Reset and initiate a new episode in the environment.
@@ -81,11 +88,14 @@ class CoControlEnv:
         Returns:
             The initial state of the episode (np.array).
         """
-        if self._info is not None and not np.any(self._info.local_done):
-            raise Exception("Env is active, call terminate first")
+        # if self._info is not None and not np.any(self._info.local_done):
+        #     raise Exception("Env is active, call terminate first")
+
+        if self._scores is not None:
+            self._score_history += (np.mean(self._scores))
 
         self._info = self._env.reset(train_mode=train_mode)[self._brain_name]
-        self._scores = [0.0] * self.get_agent_size()
+        self._scores = np.zeros(self.get_agent_size())
 
         return self._info.vector_observations
 
@@ -109,21 +119,32 @@ class CoControlEnv:
         next_states = self._info.vector_observations
         rewards = self._info.rewards
         is_terminals = self._info.local_done
-        self._scores += rewards
+        self._scores += np.array(rewards)
 
         return rewards, next_states, is_terminals
 
     def terminate(self):
         self._info = None
-        self._score = None
+        if self._scores is not None:
+            self._score_history += (self.get_score(), )
+        self._scores = None
 
     def close(self):
+        self.terminate()
         self._env.close()
-        self._info = None
 
     def get_score(self):
-        """Return the cumulative reward of the current episode."""
-        return self._score
+        """Return the cumulative average reward of the current episode."""
+        return np.mean(self._scores) if self._scores is not None else self._score_history[-1]
+
+    def get_score_history(self):
+        """Return the cumulative average reward of all episodes."""
+        return self._score_history
+
+    def clear_score_history(self):
+        """Clear the cumulative average reward of all episodes."""
+        self._scores = None
+        self._score_history = ()
 
     def get_agent_size(self):
         if self._info is None:
@@ -141,14 +162,14 @@ class CoControlEnv:
 class CoControlAgent:
     """Agent based on a policy approximator."""
 
-    def __init__(self, pi):
+    def __init__(self, policy):
         """Initialize the agent.
 
         Args:
             pi: policy-function that is callable with n states and returns a
                 (n, a)-dim array-like containing the value of each action.
         """
-        self._pi = pi
+        self._policy = policy
 
     def act(self, states):
         """Select actions for the given states.
@@ -160,15 +181,17 @@ class CoControlAgent:
         """
         if not torch.is_tensor(states):
             try:
-                states = torch.from_numpy(states)
+                states = torch.from_numpy(states, dtype=torch.float)
             except:
                 states = torch.from_numpy(np.array(states, dtype=np.float))
-
-        states = states.float()
+        else:
+            states = states.float()
 
         with torch.no_grad():
-            return self._pi(states)
+            return self._policy.sample(states)
 
+    def get_policy(self):
+        return self._policy
 
 if __name__ == '__main__':
     # Run as > PYTHONPATH=".." python environment.py
