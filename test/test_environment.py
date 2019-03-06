@@ -6,11 +6,16 @@ from cocontrol.environment import CoControlEnv, CoControlAgent
 
 class TestCoControlAgent(unittest.TestCase):
     def test_act_draws_from_pi(self):
-        dummy_pi = lambda s: torch.reshape(
-                torch.tensor([ s[i][j] if i < len(s) and j < len(s[i]) else 0
-                        for i in range(len(s)) for j in range(4) ]),
-                (len(s), 4))
-        self.agent = CoControlAgent(dummy_pi, 4)
+        class DummyPolicy:
+            def sample(self, states):
+                select_from_input = torch.tensor([
+                        states[i][j] if i < len(states) and j < len(states[i]) else 0
+                        for i in range(len(states))
+                        for j in range(4) ])
+
+                return torch.reshape(select_from_input, (len(states), 4)).float()
+
+        self.agent = CoControlAgent(DummyPolicy())
 
         self.assertTrue(torch.eq(
                 self.agent.act([[0, 1], [2, 3], [4, 5]]),
