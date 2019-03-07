@@ -113,6 +113,6 @@ When invoked without command line parameters, the script will execute learning o
 
 The parameters of the trained models can be found in the *actor_parameters.pt* and *critic_parameters.pt* files. The scores obtained during training are plotted in the *scores.png* file.
 
-The included results achieve the target of an average score of +30 over 100 episodes in 128 episodes. They reach the target score of +30 in a single episode after 56 episodes and reach a top episode score close to 39 after 64 episodes.
+The included results are obtained using 20 parallel agents and achieve the target of an average score of +30 over 100 episodes in 128 episodes (per agent). They reach the target score of +30 in a single episode after 56 episodes and reach a top episode score close to 39 after.
 
 ![Scores](scores.png)
